@@ -83,10 +83,10 @@ namespace pimoroni {
 #define TIMING_V_PULSE   8
 #define TIMING_V_BACK    (13 + TIMING_V_PULSE)
 #define TIMING_V_DISPLAY (480 + TIMING_V_BACK)
-#define TIMING_V_FRONT   (3 + TIMING_V_DISPLAY)
-#define TIMING_H_FRONT   40
+#define TIMING_V_FRONT   (5 + TIMING_V_DISPLAY)
+#define TIMING_H_FRONT   4
 #define TIMING_H_PULSE   25
-#define TIMING_H_BACK    50
+#define TIMING_H_BACK    30
 #define TIMING_H_DISPLAY 480
 
 #define LOW_PRIO_IRQ0 (NUM_IRQS - NUM_USER_IRQS)
@@ -133,7 +133,7 @@ void __no_inline_not_in_flash_func(ST7701::drive_timing)()
             case 3:
                 // Display, trigger next frame at frame end
                 instr = 0x40000000u;  // HSYNC high
-                if (timing_row == TIMING_V_FRONT - 1) instr |= 0xC001u;  // irq 1, to trigger queueing DMA for a new frame 
+                if (timing_row == TIMING_V_DISPLAY) instr |= 0xC001u;  // irq 1, to trigger queueing DMA for a new frame 
                 else if (timing_row >= TIMING_V_BACK - 1 && timing_row < TIMING_V_DISPLAY) instr |= 0xC000u;  // irq 0, to trigger queueing DMA for a new line 
                 else instr |= 0xA042u;  // NOP
                 if (timing_row >= TIMING_V_PULSE) instr |= 0x80000000u;  // VSYNC high if not in VSYNC pulse
@@ -352,7 +352,7 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       // TODO: Figure out what's actually display specific
       command(reg::MADCTL, 1, "\x00");  // Normal scan direction and RGB pixels
       command(reg::LNESET, 2, "\x3b\x00");   // (59 + 1) * 8 = 480 lines
-      command(reg::PORCTRL, 2, "\x0d\x03");  // 13 VBP, 3 VFP
+      command(reg::PORCTRL, 2, "\x0d\x05");  // 13 VBP, 5 VFP
       command(reg::INVSET, 2, "\x32\x05");
       command(reg::COLCTRL, 1, "\x08");      // LED polarity reversed
       command(reg::PVGAMCTRL, 16, "\x00\x11\x18\x0e\x11\x06\x07\x08\x07\x22\x04\x12\x0f\xaa\x31\x18");
