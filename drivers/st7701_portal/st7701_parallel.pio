@@ -1,0 +1,16 @@
+; Output 18 bit parallel RGB666 data every clock
+; Wait for irq 4 from the timing SM between each row
+; Side-set is data enable
+
+.program st7701_parallel
+.side_set 1
+
+.wrap_target
+  mov x, y      side 0  ; y needs to be set to width-1 at init time
+  wait 1 irq 4  side 0  ; wait for the irq from the timing SM
+  nop side 1 [1]        ; This reduces the offset of the image on the screen from 4 to 3 pixels
+loop:                   ; Not really sure why the offset is there, enable should only have 5ns setup
+  out pins, 16  side 1
+  jmp x-- loop  side 1
+  mov pins, null side 1
+.wrap
