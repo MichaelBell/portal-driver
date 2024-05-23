@@ -17,7 +17,7 @@
 
 using namespace pimoroni;
 
-static const uint BACKLIGHT = PIN_UNUSED;
+static const uint BACKLIGHT = 38;
 
 static const int WIDTH = 480;
 static const int HEIGHT = 480;

@@ -334,11 +334,17 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     // if a backlight pin is provided then set it up for
     // pwm control
     if(lcd_bl != PIN_UNUSED) {
+      #if 0
       pwm_config cfg = pwm_get_default_config();
       pwm_set_wrap(pwm_gpio_to_slice_num(lcd_bl), 65535);
       pwm_init(pwm_gpio_to_slice_num(lcd_bl), &cfg, true);
       gpio_set_function(lcd_bl, GPIO_FUNC_PWM);
       set_backlight(0); // Turn backlight off initially to avoid nasty surprises
+      #else
+      gpio_init(lcd_bl);
+      gpio_set_dir(lcd_bl, GPIO_OUT);
+      gpio_put(lcd_bl, 0);
+      #endif
     }
 
     command(reg::SWRESET);
@@ -409,7 +415,11 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     if(lcd_bl != PIN_UNUSED) {
       //update(); // Send the new buffer to the display to clear any previous content
       sleep_ms(50); // Wait for the update to apply
+      #if 0
       set_backlight(255); // Turn backlight on now surprises have passed
+      #else
+      gpio_put(lcd_bl, 1);
+      #endif
     }
   }
 
