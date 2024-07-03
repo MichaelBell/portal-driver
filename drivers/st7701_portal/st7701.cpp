@@ -81,7 +81,7 @@ namespace pimoroni {
 
 
 #define TIMING_V_PULSE   8
-#define TIMING_V_BACK    (13 + TIMING_V_PULSE)
+#define TIMING_V_BACK    (5 + TIMING_V_PULSE)
 #define TIMING_V_DISPLAY (480 + TIMING_V_BACK)
 #define TIMING_V_FRONT   (5 + TIMING_V_DISPLAY)
 #define TIMING_H_FRONT   4
@@ -170,7 +170,12 @@ void __no_inline_not_in_flash_func(ST7701::start_line_xfer())
     pio_sm_exec_wait_blocking(st_pio, parallel_sm, pio_encode_mov(pio_osr, pio_null));
     pio_sm_set_enabled(st_pio, parallel_sm, true);
 
-    dma_channel_set_read_addr(st_dma, &line_buffer[width * (display_row & (NUM_LINE_BUFFERS - 1))], true);
+    if ((intptr_t)framebuffer >= 0x20000000) {
+      dma_channel_set_read_addr(st_dma, &framebuffer[width * (display_row >> row_shift)], true);  
+    }
+    else {
+      dma_channel_set_read_addr(st_dma, &line_buffer[width * ((display_row >> row_shift) & (NUM_LINE_BUFFERS - 1))], true);
+    }
     ++display_row;
 
     irq_set_pending(LOW_PRIO_IRQ0);
@@ -213,7 +218,8 @@ void __no_inline_not_in_flash_func(line_fill_isr()) {
 }
 
 void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
-    while (fill_row < height && fill_row < display_row + NUM_LINE_BUFFERS - 1) {
+    if ((intptr_t)framebuffer >= 0x20000000) return;
+    while (fill_row < height && fill_row < (display_row >> row_shift) + NUM_LINE_BUFFERS - 1) {
         memcpy(&line_buffer[width * (fill_row & (NUM_LINE_BUFFERS - 1))], &framebuffer[width * fill_row], width << 1);
         ++fill_row;
     }
@@ -237,7 +243,15 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
 
       st_pio = pio1;
       parallel_sm = pio_claim_unused_sm(st_pio, true);
-      parallel_offset = pio_add_program(st_pio, &st7701_parallel_program);
+      if      (width == 480) parallel_offset = pio_add_program(st_pio, &st7701_parallel_program);
+      else if (width == 240) parallel_offset = pio_add_program(st_pio, &st7701_parallel_double_program);
+      else {
+        printf("Unsupported width\n");
+        return;
+      }
+
+      if (height == 240) row_shift = 1;
+
       timing_sm = pio_claim_unused_sm(st_pio, true);
       timing_offset = pio_add_program(st_pio, &st7701_timing_program);
 
@@ -279,10 +293,17 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       sm_config_set_out_shift(&c, true, true, 32);
       
       // Determine clock divider
-      //constexpr uint32_t max_pio_clk = 32 * MHZ;
-      //const uint32_t sys_clk_hz = clock_get_hz(clk_sys);
-      //const uint32_t clk_div = (sys_clk_hz + max_pio_clk - 1) / max_pio_clk;
-      const uint32_t clk_div = 5;
+      uint32_t max_pio_clk;
+      if ((intptr_t)framebuffer >= 0x14000000 || width <= 240) {
+        // Frame buffer in internal RAM or pixel doubling, go as fast as possible
+        max_pio_clk = 34 * MHZ;
+      }
+      else {
+        // Frame buffer in PSRAM and not pixel doubling, slow down a bit
+        max_pio_clk = 25 * MHZ;
+      }
+      const uint32_t sys_clk_hz = clock_get_hz(clk_sys);
+      const uint32_t clk_div = (sys_clk_hz + max_pio_clk - 1) / max_pio_clk;
       sm_config_set_clkdiv(&c, clk_div);
       
       pio_sm_init(st_pio, parallel_sm, parallel_offset, &c);
@@ -354,11 +375,11 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     // Commmand 2 BK0 - kinda a page select
     command(reg::CND2BKxSEL, 5, "\x77\x01\x00\x00\x10");
 
-    if(width == 480 && height == 480) {
+    /*if(width == 480 && height == 480) */ {
       // TODO: Figure out what's actually display specific
       command(reg::MADCTL, 1, "\x00");  // Normal scan direction and RGB pixels
       command(reg::LNESET, 2, "\x3b\x00");   // (59 + 1) * 8 = 480 lines
-      command(reg::PORCTRL, 2, "\x0d\x05");  // 13 VBP, 5 VFP
+      command(reg::PORCTRL, 2, "\x05\x05");  // 13 VBP, 5 VFP
       command(reg::INVSET, 2, "\x32\x05");
       command(reg::COLCTRL, 1, "\x08");      // LED polarity reversed
       command(reg::PVGAMCTRL, 16, "\x00\x11\x18\x0e\x11\x06\x07\x08\x07\x22\x04\x12\x0f\xaa\x31\x18");
@@ -444,7 +465,7 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     }
 
     // 480x480 Square Display
-    if(width == 480 && height == 480) {
+    /*if(width == 480 && height == 480)*/ {
       madctl = 0;
     }
 

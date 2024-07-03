@@ -89,6 +89,7 @@ namespace pimoroni {
 
     uint16_t* line_buffer;
     int display_row = 0;
+    int row_shift = 0;
     int fill_row = 0;
   };
 

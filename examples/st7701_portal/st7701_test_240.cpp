@@ -21,16 +21,19 @@ using namespace pimoroni;
 
 static const uint BACKLIGHT = 38;
 
-static const int WIDTH = 480;
-static const int HEIGHT = 480;
+static constexpr int WIDTH = 240;
+static constexpr int HEIGHT = 240;
 static const uint LCD_CLK = 26;
 static const uint LCD_CS = 28;
 static const uint LCD_DAT = 27;
 static const uint LCD_DC = PIN_UNUSED;
 static const uint LCD_D0 = 1;
 
-uint16_t* framebuffer = (uint16_t*)0x11000000;
-uint16_t* framebuffer2 = (uint16_t*)0x11080000;
+static uint16_t buf1[WIDTH*HEIGHT];
+static uint16_t buf2[WIDTH*HEIGHT];
+
+uint16_t* framebuffer = buf1;
+uint16_t* framebuffer2 = buf2;
 
 ST7701 st7701(
   WIDTH,
@@ -70,76 +73,6 @@ static void __no_inline_not_in_flash_func(set_qmi_timing)() {
     (void) *ptr;
 }
 
-void __no_inline_not_in_flash_func(setup_psram)(uint cs_pin) {
-    gpio_set_function(cs_pin, GPIO_FUNC_XIP_CS1);
-
-    // Enable direct mode, PSRAM CS, clkdiv of 10.
-    qmi_hw->direct_csr = 10 << QMI_DIRECT_CSR_CLKDIV_LSB | \
-                        QMI_DIRECT_CSR_EN_BITS | \
-                        QMI_DIRECT_CSR_AUTO_CS1N_BITS;
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS)
-        ;
-
-    // Enable QPI mode on the PSRAM
-    const uint CMD_QPI_EN = 0x35;
-    qmi_hw->direct_tx = QMI_DIRECT_TX_NOPUSH_BITS | CMD_QPI_EN;
-
-    while (qmi_hw->direct_csr & QMI_DIRECT_CSR_BUSY_BITS)
-        ;
-
-#if 1
-    // Set PSRAM timing for APS6404:
-    // - Max select assumes a sys clock speed >= 240MHz
-    // - Min deselect assumes a sys clock speed <= 305MHz
-    // - Clkdiv of 2 is OK up to 266MHz.
-    qmi_hw->m[1].timing = 1 << QMI_M1_TIMING_COOLDOWN_LSB |
-                          QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB |
-                          30 << QMI_M1_TIMING_MAX_SELECT_LSB |
-                          5 << QMI_M1_TIMING_MIN_DESELECT_LSB |
-                          3 << QMI_M1_TIMING_RXDELAY_LSB |
-                          2 << QMI_M1_TIMING_CLKDIV_LSB;
-#else
-    // Set PSRAM timing for APS6404:
-    // - Max select assumes a sys clock speed >= 120MHz
-    // - Min deselect assumes a sys clock speed <= 138MHz
-    // - Clkdiv of 1 is OK up to 133MHz.
-    qmi_hw->m[1].timing = 1 << QMI_M1_TIMING_COOLDOWN_LSB |
-                          QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB |
-                          15 << QMI_M1_TIMING_MAX_SELECT_LSB |
-                          2 << QMI_M1_TIMING_MIN_DESELECT_LSB |
-                          2 << QMI_M1_TIMING_RXDELAY_LSB |
-                          1 << QMI_M1_TIMING_CLKDIV_LSB;
-#endif
-    
-    // Set PSRAM commands and formats
-    qmi_hw->m[1].rfmt = 
-        QMI_M0_RFMT_PREFIX_WIDTH_VALUE_Q << QMI_M0_RFMT_PREFIX_WIDTH_LSB |\
-        QMI_M0_RFMT_ADDR_WIDTH_VALUE_Q   << QMI_M0_RFMT_ADDR_WIDTH_LSB |\
-        QMI_M0_RFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M0_RFMT_SUFFIX_WIDTH_LSB |\
-        QMI_M0_RFMT_DUMMY_WIDTH_VALUE_Q  << QMI_M0_RFMT_DUMMY_WIDTH_LSB |\
-        QMI_M0_RFMT_DATA_WIDTH_VALUE_Q   << QMI_M0_RFMT_DATA_WIDTH_LSB |\
-        QMI_M0_RFMT_PREFIX_LEN_VALUE_8   << QMI_M0_RFMT_PREFIX_LEN_LSB |\
-        6                                << QMI_M0_RFMT_DUMMY_LEN_LSB;
-
-    qmi_hw->m[1].rcmd = 0xEB;
-
-    qmi_hw->m[1].wfmt = 
-        QMI_M0_WFMT_PREFIX_WIDTH_VALUE_Q << QMI_M0_WFMT_PREFIX_WIDTH_LSB |\
-        QMI_M0_WFMT_ADDR_WIDTH_VALUE_Q   << QMI_M0_WFMT_ADDR_WIDTH_LSB |\
-        QMI_M0_WFMT_SUFFIX_WIDTH_VALUE_Q << QMI_M0_WFMT_SUFFIX_WIDTH_LSB |\
-        QMI_M0_WFMT_DUMMY_WIDTH_VALUE_Q  << QMI_M0_WFMT_DUMMY_WIDTH_LSB |\
-        QMI_M0_WFMT_DATA_WIDTH_VALUE_Q   << QMI_M0_WFMT_DATA_WIDTH_LSB |\
-        QMI_M0_WFMT_PREFIX_LEN_VALUE_8   << QMI_M0_WFMT_PREFIX_LEN_LSB;
-
-    qmi_hw->m[1].wcmd = 0x38;
-
-    // Disable direct mode
-    qmi_hw->direct_csr = 0;
-
-    // Enable writes to PSRAM
-    hw_set_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_WRITABLE_M1_BITS);
-}
-
 uint16_t st7701_pixel(uint8_t r, uint8_t g, uint8_t b) {
     uint32_t value = ((r & 0xFC) << 24) | ((g & 0xFC) << 18) | ((b & 0xFC) << 12);
 
@@ -177,20 +110,11 @@ void core1_main() {
 
 int main(void) {
     set_qmi_timing();
-    setup_psram(47);
     set_sys_clock_khz(266000, true);
 
-    uint apa102_sm = pio_claim_unused_sm(pio0, true);
-    plasma::APA102 apa102(10, pio0, apa102_sm, LED_DAT, LED_CLK);
-
-    for (int i = 0; i < 10; ++i) {
-        apa102.set_rgb(i, 25*i, 0, 0);
-    }
-    apa102.update(true);
-
     int i = 0;
-    for (int y = 0; y < 480; ++y) {
-        for (int x = 0; x < 480; ++x, ++i) {
+    for (int y = 0; y < HEIGHT; ++y) {
+        for (int x = 0; x < WIDTH; ++x, ++i) {
 #if 0
             uint8_t r,g,b;
             from_hsv((x+y) / 480.f, 1.0f, 0.7f, r, g, b);
@@ -229,14 +153,15 @@ int main(void) {
 #if 1
     uint16_t* cur_fb = framebuffer;
     uint16_t* next_fb = framebuffer2;
+    memset(cur_fb, 0, WIDTH*HEIGHT*2);
+    memset(next_fb, 0, WIDTH*HEIGHT*2);
     int t = 10;
     while(true) {
         i = 0;
-        //memset(next_fb, 0, 480*480*2);
-        for (int y = 0; y < 480; ++y) {
-            for (int x = 0; x < 480; ++x, ++i) {
+        for (int y = 0; y < HEIGHT; ++y) {
+            for (int x = 0; x < WIDTH; ++x, ++i) {
                 uint8_t r,g,b;
-                from_hsv((x+y+t) / 480.f, 1.0f, 0.7f, r, g, b);
+                from_hsv((x+y+t) / 240.f, 1.0f, 0.7f, r, g, b);
                 next_fb[i] = st7701_pixel(r, g, b);
             }
         }
