@@ -46,7 +46,7 @@ ST7701 st7701(
     BACKLIGHT
   },
   framebuffer,
-  LCD_D0
+  nullptr
 );
 
 static const uint LED_CLK = 33;
@@ -141,11 +141,19 @@ void __no_inline_not_in_flash_func(setup_psram)(uint cs_pin) {
 }
 
 uint16_t st7701_pixel(uint8_t r, uint8_t g, uint8_t b) {
+#if 0
     uint32_t value = ((r & 0xFC) << 24) | ((g & 0xFC) << 18) | ((b & 0xFC) << 12);
 
     // Bizarrely gcc doesn't have a reverse bits primitive
     asm volatile ( "rbit %[value], %[value]" : [value] "+r"(value));
     return value & 0xFFFF;
+#else
+        uint32_t value = ((r & 0xF8) << 24) | ((g & 0xFC) << 19) | ((b & 0xF8) << 13);
+
+    // Bizarrely gcc doesn't have a reverse bits primitive
+    //asm volatile ( "rbit %[value], %[value]" : [value] "+r"(value));
+    return __builtin_bswap32(value);
+#endif
 }
 
 // HSV Conversion expects float inputs in the range of 0.00-1.00 for each channel
@@ -180,6 +188,7 @@ int main(void) {
     setup_psram(47);
     set_sys_clock_khz(266000, true);
 
+#if 0
     uint apa102_sm = pio_claim_unused_sm(pio0, true);
     plasma::APA102 apa102(10, pio0, apa102_sm, LED_DAT, LED_CLK);
 
@@ -187,6 +196,7 @@ int main(void) {
         apa102.set_rgb(i, 25*i, 0, 0);
     }
     apa102.update(true);
+#endif
 
     int i = 0;
     for (int y = 0; y < 480; ++y) {
@@ -198,7 +208,7 @@ int main(void) {
 #else
             if (x == y) framebuffer[i] = 0;
             else if (x == 0) framebuffer[i] = st7701_pixel(0, 255, 0);
-            else if (x == 477) framebuffer[i] = st7701_pixel(255, 0, 0);
+            else if (x == WIDTH-2) framebuffer[i] = st7701_pixel(255, 0, 0);
             else {
                 if (y < 40) framebuffer[i] = st7701_pixel(x, x, x);
                 else if (y < 80) framebuffer[i] = st7701_pixel(x, 0, 0);
@@ -224,7 +234,7 @@ int main(void) {
 
     multicore_launch_core1(core1_main);
 
-    sleep_ms(2000);
+    sleep_ms(20000);
 
 #if 1
     uint16_t* cur_fb = framebuffer;

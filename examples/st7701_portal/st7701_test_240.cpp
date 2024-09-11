@@ -17,6 +17,10 @@
 
 #include "drivers/plasma/apa102.hpp"
 
+extern "C" {
+#include "logic_analyser.h"
+}
+
 using namespace pimoroni;
 
 static const uint BACKLIGHT = 38;
@@ -49,7 +53,7 @@ ST7701 st7701(
     BACKLIGHT
   },
   framebuffer,
-  LCD_D0
+  nullptr
 );
 
 static const uint LED_CLK = 33;
@@ -74,11 +78,11 @@ static void __no_inline_not_in_flash_func(set_qmi_timing)() {
 }
 
 uint16_t st7701_pixel(uint8_t r, uint8_t g, uint8_t b) {
-    uint32_t value = ((r & 0xFC) << 24) | ((g & 0xFC) << 18) | ((b & 0xFC) << 12);
+    uint32_t value = ((r & 0xF8) << 24) | ((g & 0xFC) << 19) | ((b & 0xF8) << 13);
 
     // Bizarrely gcc doesn't have a reverse bits primitive
-    asm volatile ( "rbit %[value], %[value]" : [value] "+r"(value));
-    return value & 0xFFFF;
+    //asm volatile ( "rbit %[value], %[value]" : [value] "+r"(value));
+    return __builtin_bswap32(value);
 }
 
 // HSV Conversion expects float inputs in the range of 0.00-1.00 for each channel
@@ -110,7 +114,9 @@ void core1_main() {
 
 int main(void) {
     set_qmi_timing();
-    set_sys_clock_khz(266000, true);
+    // set_sys_clock_khz(266000, true);
+
+    logic_analyser_init(pio0, 21, 2, 2000, 5);
 
     int i = 0;
     for (int y = 0; y < HEIGHT; ++y) {
@@ -122,7 +128,7 @@ int main(void) {
 #else
             if (x == y) framebuffer[i] = 0;
             else if (x == 0) framebuffer[i] = st7701_pixel(0, 255, 0);
-            else if (x == 477) framebuffer[i] = st7701_pixel(255, 0, 0);
+            else if (x == WIDTH-1) framebuffer[i] = st7701_pixel(255, 0, 0);
             else {
                 if (y < 40) framebuffer[i] = st7701_pixel(x, x, x);
                 else if (y < 80) framebuffer[i] = st7701_pixel(x, 0, 0);
@@ -147,8 +153,19 @@ int main(void) {
     printf("QSPI 0 timing: %08lx\n", qmi_hw->m[0].timing);
 
     multicore_launch_core1(core1_main);
+    sleep_ms(1);
 
-    sleep_ms(2000);
+    while (gpio_get(21));
+    logic_analyser_arm(21, true);
+
+    sleep_ms(10000);
+
+    if (logic_analyser_is_capture_done()) {
+        logic_analyser_print_capture_buf();
+    }
+    else {
+        printf("Capture not complete\n");
+    }
 
 #if 1
     uint16_t* cur_fb = framebuffer;

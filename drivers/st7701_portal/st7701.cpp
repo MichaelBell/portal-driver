@@ -13,8 +13,6 @@
 #endif
 
 namespace pimoroni {
-  uint8_t madctl;
-
   enum dcx {
     CMD = 0x00,
     DATA = 0x01
@@ -105,7 +103,7 @@ void __no_inline_not_in_flash_func(ST7701::drive_timing)()
         switch (timing_phase) {
             case 0:
                 // Front Porch
-                instr = 0x4000A042u;  // HSYNC high, NOP
+                instr = 0x4000B042u;  // HSYNC high, NOP
                 if (timing_row >= TIMING_V_PULSE) instr |= 0x80000000u;  // VSYNC high if not in VSYNC pulse
                 instr |= (TIMING_H_FRONT - 3) << 16;
                 pio_sm_put(st_pio, timing_sm, instr);
@@ -113,7 +111,7 @@ void __no_inline_not_in_flash_func(ST7701::drive_timing)()
 
             case 1:
                 // HSYNC
-                instr = 0x0000A042u;  // HSYNC low, NOP
+                instr = 0x0000B042u;  // HSYNC low, NOP
                 if (timing_row >= TIMING_V_PULSE) instr |= 0x80000000u;  // VSYNC high if not in VSYNC pulse
                 instr |= (TIMING_H_PULSE - 3) << 16;
                 pio_sm_put(st_pio, timing_sm, instr);
@@ -123,8 +121,8 @@ void __no_inline_not_in_flash_func(ST7701::drive_timing)()
                 // Back Porch, trigger pixel channels if in display window
                 instr = 0x40000000u;  // HSYNC high
                 if (timing_row >= TIMING_V_PULSE) instr |= 0x80000000u;  // VSYNC high if not in VSYNC pulse
-                if (timing_row >= TIMING_V_BACK && timing_row < TIMING_V_DISPLAY) instr |= 0xC004u;  // IRQ 4, triggers the data SM
-                else instr |= 0xA042u;  // NOP
+                if (timing_row >= TIMING_V_BACK && timing_row < TIMING_V_DISPLAY) instr |= 0xD004u;  // IRQ 4, triggers the data SM
+                else instr |= 0xB042u;  // NOP
                 instr |= (TIMING_H_BACK - 3) << 16;
                 pio_sm_put(st_pio, timing_sm, instr);
                 //printf(".\n");
@@ -133,9 +131,9 @@ void __no_inline_not_in_flash_func(ST7701::drive_timing)()
             case 3:
                 // Display, trigger next frame at frame end
                 instr = 0x40000000u;  // HSYNC high
-                if (timing_row == TIMING_V_DISPLAY) instr |= 0xC001u;  // irq 1, to trigger queueing DMA for a new frame 
-                else if (timing_row >= TIMING_V_BACK - 1 && timing_row < TIMING_V_DISPLAY) instr |= 0xC000u;  // irq 0, to trigger queueing DMA for a new line 
-                else instr |= 0xA042u;  // NOP
+                if (timing_row == TIMING_V_DISPLAY) instr |= 0xD001u;  // irq 1, to trigger queueing DMA for a new frame 
+                else if (timing_row >= TIMING_V_BACK - 1 && timing_row < TIMING_V_DISPLAY) instr |= 0xD000u;  // irq 0, to trigger queueing DMA for a new line 
+                else instr |= 0xB042u;  // NOP
                 if (timing_row >= TIMING_V_PULSE) instr |= 0x80000000u;  // VSYNC high if not in VSYNC pulse
                 instr |= (TIMING_H_DISPLAY - 3) << 16;
                 pio_sm_put(st_pio, timing_sm, instr);
@@ -162,12 +160,14 @@ void __no_inline_not_in_flash_func(ST7701::handle_end_of_line())
 void __no_inline_not_in_flash_func(ST7701::start_line_xfer())
 {
     hw_clear_bits(&st_pio->irq, 0x1);
+
     dma_channel_abort(st_dma);
     dma_channel_wait_for_finish_blocking(st_dma);
     pio_sm_set_enabled(st_pio, parallel_sm, false);
     pio_sm_clear_fifos(st_pio, parallel_sm);
-    pio_sm_exec_wait_blocking(st_pio, parallel_sm, pio_encode_jmp(parallel_offset));
     pio_sm_exec_wait_blocking(st_pio, parallel_sm, pio_encode_mov(pio_osr, pio_null));
+    pio_sm_exec_wait_blocking(st_pio, parallel_sm, pio_encode_out(pio_null, 32));
+    pio_sm_exec_wait_blocking(st_pio, parallel_sm, pio_encode_jmp(parallel_offset));
     pio_sm_set_enabled(st_pio, parallel_sm, true);
 
     if ((intptr_t)framebuffer >= 0x20000000) {
@@ -225,23 +225,29 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     }
 }
 
-  ST7701::ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer,
+  ST7701::ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer, uint16_t* linebuffer,
       uint d0, uint hsync, uint vsync, uint lcd_de, uint lcd_dot_clk) :
             DisplayDriver(width, height, rotation),
             spi(control_pins.spi),
             spi_cs(control_pins.cs), spi_sck(control_pins.sck), spi_dat(control_pins.mosi), lcd_bl(control_pins.bl),
             d0(d0), hsync(hsync), vsync(vsync), lcd_de(lcd_de), lcd_dot_clk(lcd_dot_clk),
-            framebuffer(framebuffer)
+            framebuffer(framebuffer),
+            line_buffer(linebuffer)
   {
       st7701_inst = this;
+
+      // Allocate line buffers only if none supplied and frame buffer is not in internal RAM.
+      if(!line_buffer && (intptr_t)framebuffer < 0x20000000) {
+        line_buffer = (uint16_t*)malloc(NUM_LINE_BUFFERS * width * sizeof(line_buffer[0]));
+      }
   }
 
   void ST7701::init() {
+      irq_handler_t current = nullptr;
+  
       init_framebuffer();
 
-      line_buffer = (uint16_t*)malloc(NUM_LINE_BUFFERS * width * sizeof(line_buffer[0]));
-
-      st_pio = pio1;
+      st_pio = pio2;
       parallel_sm = pio_claim_unused_sm(st_pio, true);
       if      (width == 480) parallel_offset = pio_add_program(st_pio, &st7701_parallel_program);
       else if (width == 240) parallel_offset = pio_add_program(st_pio, &st7701_parallel_double_program);
@@ -275,22 +281,27 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       pio_gpio_init(st_pio, lcd_de);
       pio_gpio_init(st_pio, lcd_dot_clk);
 
-      for(auto i = 0u; i < 18; i++) {
-        //gpio_set_function(d0 + i, GPIO_FUNC_SIO);
-        //gpio_set_dir(d0 + i, GPIO_OUT);
-        //gpio_init(d0 + 0); gpio_set_dir(d0 + i, GPIO_OUT);
+      for(auto i = 0u; i < 16; i++) {
         pio_gpio_init(st_pio, d0 + i);
       }
+      for(auto i = 16u; i < 18; i++) {
+        gpio_init(d0 + i);
+        gpio_set_dir(d0 + i, GPIO_OUT);
+        gpio_put(d0 + i, false);
+      }
 
-      pio_sm_set_consecutive_pindirs(st_pio, parallel_sm, d0, 18, true);
+      pio_sm_set_consecutive_pindirs(st_pio, parallel_sm, d0, 16, true);
       pio_sm_set_consecutive_pindirs(st_pio, parallel_sm, hsync, 4, true);
 
-      pio_sm_config c = st7701_parallel_program_get_default_config(parallel_offset);
+      pio_sm_config c;
+      if (width == 480) c = st7701_parallel_program_get_default_config(parallel_offset);
+      else              c = st7701_parallel_double_program_get_default_config(parallel_offset);
 
-      sm_config_set_out_pins(&c, d0, 18);
+      sm_config_set_out_pins(&c, d0, 16);
       sm_config_set_sideset_pins(&c, lcd_de);
       sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
       sm_config_set_out_shift(&c, true, true, 32);
+      sm_config_set_in_shift(&c, false, false, 32);
       
       // Determine clock divider
       uint32_t max_pio_clk;
@@ -308,7 +319,7 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       
       pio_sm_init(st_pio, parallel_sm, parallel_offset, &c);
       pio_sm_exec(st_pio, parallel_sm, pio_encode_out(pio_y, 32));
-      pio_sm_put(st_pio, parallel_sm, width-1);
+      pio_sm_put(st_pio, parallel_sm, (width >> 1) - 1);
       pio_sm_set_enabled(st_pio, parallel_sm, true);
 
       c = st7701_timing_program_get_default_config(timing_offset);
@@ -327,6 +338,7 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       channel_config_set_transfer_data_size(&config, DMA_SIZE_32);
       channel_config_set_high_priority(&config, true);
       channel_config_set_dreq(&config, pio_get_dreq(st_pio, parallel_sm, true));
+      channel_config_set_bswap(&config, true);
       dma_channel_configure(st_dma, &config, &st_pio->txf[parallel_sm], line_buffer, width >> 1, false);
 
       hw_set_bits(&bus_ctrl_hw->priority, (BUSCTRL_BUS_PRIORITY_PROC1_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS | BUSCTRL_BUS_PRIORITY_DMA_W_BITS));
@@ -336,19 +348,26 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
       common_init();
 
       printf("Setup screen timing\n");
-
+      current = irq_get_exclusive_handler(LOW_PRIO_IRQ0);
+      if(current) irq_remove_handler(LOW_PRIO_IRQ0, current);
       irq_set_exclusive_handler(LOW_PRIO_IRQ0, line_fill_isr);
       irq_set_enabled(LOW_PRIO_IRQ0, true);
       irq_set_pending(LOW_PRIO_IRQ0);
 
       // Setup timing
       hw_set_bits(&st_pio->inte1, 0x010 << timing_sm);  // TX not full
-      irq_set_exclusive_handler(PIO1_IRQ_1, timing_isr);
-      irq_set_enabled(PIO1_IRQ_1, true);
+      // Remove the MicroPython handler if it's set
+      current = irq_get_exclusive_handler(pio_get_irq_num(st_pio, 1));
+      if(current) irq_remove_handler(pio_get_irq_num(st_pio, 1), current);
+      irq_set_exclusive_handler(pio_get_irq_num(st_pio, 1), timing_isr);
+      irq_set_enabled(pio_get_irq_num(st_pio, 1), true);
 
       hw_set_bits(&st_pio->inte0, 0x300); // IRQ 0
-      irq_set_exclusive_handler(PIO1_IRQ_0, end_of_line_isr);
-      irq_set_enabled(PIO1_IRQ_0, true);
+      // Remove the MicroPython handler if it's set
+      current = irq_get_exclusive_handler(pio_get_irq_num(st_pio, 0));
+      if(current) irq_remove_handler(pio_get_irq_num(st_pio, 0), current);
+      irq_set_exclusive_handler(pio_get_irq_num(st_pio, 0), end_of_line_isr);
+      irq_set_enabled(pio_get_irq_num(st_pio, 0), true);
     }
 
   void ST7701::common_init() {
@@ -375,11 +394,11 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
     // Commmand 2 BK0 - kinda a page select
     command(reg::CND2BKxSEL, 5, "\x77\x01\x00\x00\x10");
 
-    /*if(width == 480 && height == 480) */ {
+    /*if(width == 480 && height == 480)*/ {
       // TODO: Figure out what's actually display specific
       command(reg::MADCTL, 1, "\x00");  // Normal scan direction and RGB pixels
       command(reg::LNESET, 2, "\x3b\x00");   // (59 + 1) * 8 = 480 lines
-      command(reg::PORCTRL, 2, "\x05\x05");  // 13 VBP, 5 VFP
+      command(reg::PORCTRL, 2, "\x0d\x05");  // 13 VBP, 5 VFP
       command(reg::INVSET, 2, "\x32\x05");
       command(reg::COLCTRL, 1, "\x08");      // LED polarity reversed
       command(reg::PVGAMCTRL, 16, "\x00\x11\x18\x0e\x11\x06\x07\x08\x07\x22\x04\x12\x0f\xaa\x31\x18");
@@ -445,20 +464,42 @@ void __no_inline_not_in_flash_func(ST7701::fill_next_line()) {
   }
 
   void ST7701::cleanup() {
+    irq_handler_t current;
+
+    irq_set_enabled(pio_get_irq_num(st_pio, 0), false);
+    current = irq_get_exclusive_handler(pio_get_irq_num(st_pio, 0));
+    if(current) irq_remove_handler(pio_get_irq_num(st_pio, 0), current);
+  
+    irq_set_enabled(pio_get_irq_num(st_pio, 1), false);
+    current = irq_get_exclusive_handler(pio_get_irq_num(st_pio, 1));
+    if(current) irq_remove_handler(pio_get_irq_num(st_pio, 1), current);
+
+    irq_set_enabled(LOW_PRIO_IRQ0, false);
+
     if(dma_channel_is_claimed(st_dma)) {
+      while (dma_channel_is_busy(st_dma))
+        ;
       dma_channel_abort(st_dma);
       dma_channel_unclaim(st_dma);
     }
-    if(spi) return; // SPI mode needs no further tear down
 
     if(pio_sm_is_claimed(st_pio, parallel_sm)) {
       pio_sm_set_enabled(st_pio, parallel_sm, false);
-      pio_sm_drain_tx_fifo(st_pio, parallel_sm);
+      pio_sm_clear_fifos(st_pio, parallel_sm);
       pio_sm_unclaim(st_pio, parallel_sm);
     }
+
+    if(pio_sm_is_claimed(st_pio, timing_sm)) {
+      pio_sm_set_enabled(st_pio, timing_sm, false);
+      pio_sm_clear_fifos(st_pio, timing_sm);
+      pio_sm_unclaim(st_pio, timing_sm);
+    }
+
+    pio_clear_instruction_memory(st_pio);
   }
 
   void ST7701::configure_display(Rotation rotate) {
+    uint8_t madctl = 0;
 
     if(rotate == ROTATE_90 || rotate == ROTATE_270) {
       std::swap(width, height);

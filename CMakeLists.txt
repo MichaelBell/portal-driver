@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.12)
 
 set(PICO_PLATFORM rp2350-arm-s)
-set(PICO_SDK_PATH /home/mdb36/pico/rp2350/pico-sdk-rp2350)
 
 # Pull in PICO SDK (must be before project)
 include(pico_sdk_import.cmake)

@@ -1,5 +1,5 @@
 set(OUTPUT_NAME st7701_test)
-add_executable(${OUTPUT_NAME} st7701_test_240.cpp)
+add_executable(${OUTPUT_NAME} st7701_test_240.cpp logic_analyser.c)
 
 include(common/pimoroni_i2c)
 include(common/pimoroni_bus)

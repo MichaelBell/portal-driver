@@ -18,6 +18,10 @@ namespace pimoroni {
   class ST7701 : public DisplayDriver {
     spi_inst_t *spi = PIMORONI_SPI_DEFAULT_INSTANCE;
 
+  public:
+    // Must be a power of 2
+    static constexpr int NUM_LINE_BUFFERS = 4;
+
     //--------------------------------------------------
     // Variables
     //--------------------------------------------------
@@ -44,12 +48,9 @@ namespace pimoroni {
 
     static const uint32_t SPI_BAUD = 8'000'000;
 
-    // Must be a power of 2
-    static constexpr int NUM_LINE_BUFFERS = 4;
-
   public:
     // Parallel init
-    ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer,
+    ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer, uint16_t* linebuffer,
       uint d0=1, uint hsync=19, uint vsync=20, uint lcd_de = 21, uint lcd_dot_clk = 22);
 
     void init();
