@@ -38,7 +38,7 @@ namespace pimoroni {
     uint parallel_offset;
     uint timing_offset;
     uint st_dma;
-    uint line_dma;
+    uint st_dma2;
 
     uint d0 = 1; // First pin of 18-bit parallel interface
     uint hsync  = 19;
@@ -50,7 +50,7 @@ namespace pimoroni {
 
   public:
     // Parallel init
-    ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer, uint16_t* linebuffer,
+    ST7701(uint16_t width, uint16_t height, Rotation rotation, SPIPins control_pins, uint16_t* framebuffer,
       uint d0=1, uint hsync=19, uint vsync=20, uint lcd_de = 21, uint lcd_dot_clk = 22);
 
     void init();
@@ -67,7 +67,6 @@ namespace pimoroni {
     // Only to be called by ISR
     void drive_timing();
     void handle_end_of_line();
-    void fill_next_line();
 
   private:
     void common_init();
@@ -88,7 +87,7 @@ namespace pimoroni {
     uint16_t* framebuffer;
     uint16_t* next_framebuffer = nullptr;
 
-    uint16_t* line_buffer;
+    uint16_t* next_line_addr;
     int display_row = 0;
     int row_shift = 0;
     int fill_row = 0;

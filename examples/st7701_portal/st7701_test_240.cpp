@@ -52,8 +52,7 @@ ST7701 st7701(
     LCD_DC,
     BACKLIGHT
   },
-  framebuffer,
-  nullptr
+  framebuffer
 );
 
 static const uint LED_CLK = 33;
@@ -75,14 +74,6 @@ static void __no_inline_not_in_flash_func(set_qmi_timing)() {
     // Force a read through XIP to ensure the timing is applied
     volatile uint32_t* ptr = (volatile uint32_t*)0x14000000;
     (void) *ptr;
-}
-
-uint16_t st7701_pixel(uint8_t r, uint8_t g, uint8_t b) {
-    uint32_t value = ((r & 0xF8) << 24) | ((g & 0xFC) << 19) | ((b & 0xF8) << 13);
-
-    // Bizarrely gcc doesn't have a reverse bits primitive
-    //asm volatile ( "rbit %[value], %[value]" : [value] "+r"(value));
-    return __builtin_bswap32(value);
 }
 
 // HSV Conversion expects float inputs in the range of 0.00-1.00 for each channel
@@ -114,7 +105,7 @@ void core1_main() {
 
 int main(void) {
     set_qmi_timing();
-    // set_sys_clock_khz(266000, true);
+    set_sys_clock_khz(200000, true);
 
     logic_analyser_init(pio0, 21, 2, 2000, 5);
 
@@ -124,24 +115,24 @@ int main(void) {
 #if 0
             uint8_t r,g,b;
             from_hsv((x+y) / 480.f, 1.0f, 0.7f, r, g, b);
-            framebuffer[i] = st7701_pixel(r, g, b);
+            framebuffer[i] = RGB(r, g, b).to_rgb565();
 #else
             if (x == y) framebuffer[i] = 0;
-            else if (x == 0) framebuffer[i] = st7701_pixel(0, 255, 0);
-            else if (x == WIDTH-1) framebuffer[i] = st7701_pixel(255, 0, 0);
+            else if (x == 0) framebuffer[i] = RGB(0, 255, 0).to_rgb565();
+            else if (x == WIDTH-1) framebuffer[i] = RGB(255, 0, 0).to_rgb565();
             else {
-                if (y < 40) framebuffer[i] = st7701_pixel(x, x, x);
-                else if (y < 80) framebuffer[i] = st7701_pixel(x, 0, 0);
-                else if (y < 120) framebuffer[i] = st7701_pixel(x, x, 0);
-                else if (y < 160) framebuffer[i] = st7701_pixel(0, x, 0);
-                else if (y < 200) framebuffer[i] = st7701_pixel(0, x, x);
-                else if (y < 240) framebuffer[i] = st7701_pixel(0, 0, x);
-                else if (y < 280) framebuffer[i] = st7701_pixel(x, x >> 1, 0);
-                else if (y < 320) framebuffer[i] = st7701_pixel(0, x, x >> 1);
-                else if (y < 360) framebuffer[i] = st7701_pixel(x >> 1, 0, x);
-                else if (y < 400) framebuffer[i] = st7701_pixel(x >> 1, x, 0);
-                else if (y < 440) framebuffer[i] = st7701_pixel(0, x >> 1, x);
-                else              framebuffer[i] = st7701_pixel(x, 0, x >> 1);
+                if (y < 20) framebuffer[i] = RGB(x, x, x).to_rgb565();
+                else if (y < 40) framebuffer[i] = RGB(x, 0, 0).to_rgb565();
+                else if (y < 60) framebuffer[i] = RGB(x, x, 0).to_rgb565();
+                else if (y < 80) framebuffer[i] = RGB(0, x, 0).to_rgb565();
+                else if (y < 100) framebuffer[i] = RGB(0, x, x).to_rgb565();
+                else if (y < 120) framebuffer[i] = RGB(0, 0, x).to_rgb565();
+                else if (y < 140) framebuffer[i] = RGB(x, x >> 1, 0).to_rgb565();
+                else if (y < 160) framebuffer[i] = RGB(0, x, x >> 1).to_rgb565();
+                else if (y < 180) framebuffer[i] = RGB(x >> 1, 0, x).to_rgb565();
+                else if (y < 200) framebuffer[i] = RGB(x >> 1, x, 0).to_rgb565();
+                else if (y < 220) framebuffer[i] = RGB(0, x >> 1, x).to_rgb565();
+                else              framebuffer[i] = RGB(x, 0, x >> 1).to_rgb565();
             }
 #endif
         }
@@ -179,7 +170,7 @@ int main(void) {
             for (int x = 0; x < WIDTH; ++x, ++i) {
                 uint8_t r,g,b;
                 from_hsv((x+y+t) / 240.f, 1.0f, 0.7f, r, g, b);
-                next_fb[i] = st7701_pixel(r, g, b);
+                next_fb[i] = RGB(r, g, b).to_rgb565();
             }
         }
         t += 10;
